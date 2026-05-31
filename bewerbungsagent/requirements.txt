@@ -1,0 +1,36 @@
+# KI-Bewerbungsagent – Abhängigkeiten
+
+# KI / LLM
+ollama
+anthropic
+langchain
+langgraph
+chromadb
+
+# Web-Interface
+streamlit
+
+# Dateiverarbeitung
+openpyxl
+pymupdf
+python-docx
+
+# System-Beobachtung
+psutil
+pygetwindow; sys_platform == "win32"
+watchdog
+schedule
+
+# Datenanalyse und Trends
+pandas
+scikit-learn
+numpy
+
+# Web-Scraping
+requests
+beautifulsoup4
+
+# Tests
+pytest
+
+# sqlite3 ist Teil der Python-Standardbibliothek (kein separates Paket nötig)
