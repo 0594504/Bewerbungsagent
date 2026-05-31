@@ -159,9 +159,9 @@ Als Nutzer möchte ich regelmäßige, datenbasierte Berichte über den Arbeitsma
 - **FR-008:** Der Marktbeobachter MUSS mindestens einmal täglich eine Marktanalyse durchführen.
 - **FR-009:** Das System MUSS Frühindikatoren für sinkende Skill-Nachfrage erkennen und den Nutzer benachrichtigen.
 - **FR-010:** Der Skill Tracker MUSS Marktsignale vom Marktbeobachter empfangen und das Skill-Profil entsprechend anpassen.
-- **FR-011:** Das System MUSS eine regionale Konfiguration unterstützen (mindestens: Berlin). `[NEEDS CLARIFICATION: Welche weiteren Städte/Regionen sind relevant für die Demo?]`
-- **FR-012:** Das System MUSS Bewerbungsunterlagen (Anschreiben, Lebenslauf) als bearbeitbares Dokument exportieren können. `[NEEDS CLARIFICATION: Format? PDF, DOCX, beide?]`
-- **FR-013:** Das System MUSS DSGVO-konforme Datenhaltung sicherstellen. `[NEEDS CLARIFICATION: Wo werden Nutzerdaten gespeichert – lokal oder Cloud?]`
+- **FR-011:** Das System MUSS eine regionale Konfiguration unterstützen (Berlin & Brandenburg).
+- **FR-012:** Das System MUSS Bewerbungsunterlagen (Anschreiben, Lebenslauf) als bearbeitbares Dokument(DOCX) exportieren können.
+- **FR-013:** Die Daten MÜSSEN lokal gespeichert. 
 - **FR-014:** Die Agenten MÜSSEN untereinander über definierte Schnittstellen kommunizieren (kein direkter Datenbankzugriff zwischen Agenten).
 
 ### Key Entities
@@ -195,7 +195,7 @@ Als Nutzer möchte ich regelmäßige, datenbasierte Berichte über den Arbeitsma
 
 - **Sprache:** Python 3.11+
 - **Agenten-Framework:** `[NEEDS CLARIFICATION: LangGraph, CrewAI, AutoGen oder eigene Implementierung?]`
-- **LLM:** Claude (Anthropic API) für Textgenerierung (Anschreiben, Skill-Extraktion)
+- **LLM:** ChatGPT für Textgenerierung (Anschreiben, Skill-Extraktion)
 - **Datenbank:** `[NEEDS CLARIFICATION: SQLite für MVP, PostgreSQL für Production?]`
 - **Kommunikation zwischen Agenten:** Klar definierte JSON-Schemas über interne API-Calls oder Message Queue
 - **Frontend:** `[NEEDS CLARIFICATION: CLI-basiert für MVP oder einfaches Web-UI?]`
