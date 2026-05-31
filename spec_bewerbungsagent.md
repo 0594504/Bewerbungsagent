@@ -30,9 +30,6 @@ Als Nutzer möchte ich ein digitales Skill-Profil anlegen, das automatisch auf B
 2. **Given** eine Beschreibung einer Werkstudententätigkeit (Freitext), **When** der Skill Tracker die Beschreibung analysiert, **Then** werden relevante Hard und Soft Skills extrahiert und kategorisiert.
 3. **Given** ein Skill-Profil mit veralteten Skills, **When** der Marktbeobachter eine Marktanalyse liefert, **Then** werden weniger gefragte Skills im Profil entsprechend markiert.
 
-### Proposed Changes: 
-1. Wie wird ein Skill-Profil von Null aufgebaut? 1. acceptance scenario besagt wenn ein bestehendes Skill-Profil existiert dann....
-
 ---
 
 ### User Story 2 – Passende Stellenanzeigen finden und Bewerbung generieren (Priority: P1)
@@ -49,8 +46,6 @@ Als Nutzer möchte ich, dass der Agent für mich relevante(Relevant besser defin
 2. **Given** eine ausgewählte Stellenanzeige, **When** der Nutzer eine Bewerbung anfordert, **Then** generiert der Agent ein individuell formuliertes Anschreiben, das Skill-Übereinstimmungen hervorhebt.
 3. **Given** ein generiertes Anschreiben, **When** der Nutzer es überarbeitet und freigibt, **Then** wird es im Tracking-System als „versandt" markiert.
 
-### Proposed Changes: 
-1. Sollte der Agent dem Nutzer verschiedene Berufsbilder bzw. Jobrollen vorstellen, wenn der Nutzer noch nicht weiß, welche Karrieremöglichkeiten es in diesem Studiengang oder Fachbereich gibt?
 
 ---
 
