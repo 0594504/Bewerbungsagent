@@ -30,9 +30,6 @@ Als Nutzer möchte ich ein digitales Skill-Profil anlegen, das automatisch auf B
 2. **Given** eine Beschreibung einer Werkstudententätigkeit (Freitext), **When** der Skill Tracker die Beschreibung analysiert, **Then** werden relevante Hard und Soft Skills extrahiert und kategorisiert.
 3. **Given** ein Skill-Profil mit veralteten Skills, **When** der Marktbeobachter eine Marktanalyse liefert, **Then** werden weniger gefragte Skills im Profil entsprechend markiert.
 
-### Proposed Changes: 
-1. Wie wird ein Skill-Profil von Null aufgebaut? 1. acceptance scenario besagt wenn ein bestehendes Skill-Profil existiert dann....
-
 ---
 
 ### User Story 2 – Passende Stellenanzeigen finden und Bewerbung generieren (Priority: P1)
@@ -49,8 +46,6 @@ Als Nutzer möchte ich, dass der Agent für mich relevante(Relevant besser defin
 2. **Given** eine ausgewählte Stellenanzeige, **When** der Nutzer eine Bewerbung anfordert, **Then** generiert der Agent ein individuell formuliertes Anschreiben, das Skill-Übereinstimmungen hervorhebt.
 3. **Given** ein generiertes Anschreiben, **When** der Nutzer es überarbeitet und freigibt, **Then** wird es im Tracking-System als „versandt" markiert.
 
-### Proposed Changes: 
-1. Sollte der Agent dem Nutzer verschiedene Berufsbilder bzw. Jobrollen vorstellen, wenn der Nutzer noch nicht weiß, welche Karrieremöglichkeiten es in diesem Studiengang oder Fachbereich gibt?
 
 ---
 
@@ -164,9 +159,9 @@ Als Nutzer möchte ich regelmäßige, datenbasierte Berichte über den Arbeitsma
 - **FR-008:** Der Marktbeobachter MUSS mindestens einmal täglich eine Marktanalyse durchführen.
 - **FR-009:** Das System MUSS Frühindikatoren für sinkende Skill-Nachfrage erkennen und den Nutzer benachrichtigen.
 - **FR-010:** Der Skill Tracker MUSS Marktsignale vom Marktbeobachter empfangen und das Skill-Profil entsprechend anpassen.
-- **FR-011:** Das System MUSS eine regionale Konfiguration unterstützen (mindestens: Berlin). `[NEEDS CLARIFICATION: Welche weiteren Städte/Regionen sind relevant für die Demo?]`
-- **FR-012:** Das System MUSS Bewerbungsunterlagen (Anschreiben, Lebenslauf) als bearbeitbares Dokument exportieren können. `[NEEDS CLARIFICATION: Format? PDF, DOCX, beide?]`
-- **FR-013:** Das System MUSS DSGVO-konforme Datenhaltung sicherstellen. `[NEEDS CLARIFICATION: Wo werden Nutzerdaten gespeichert – lokal oder Cloud?]`
+- **FR-011:** Das System MUSS eine regionale Konfiguration unterstützen (Berlin & Brandenburg).
+- **FR-012:** Das System MUSS Bewerbungsunterlagen (Anschreiben, Lebenslauf) als bearbeitbares Dokument(DOCX) exportieren können.
+- **FR-013:** Die Daten MÜSSEN lokal gespeichert. 
 - **FR-014:** Die Agenten MÜSSEN untereinander über definierte Schnittstellen kommunizieren (kein direkter Datenbankzugriff zwischen Agenten).
 
 ### Key Entities
@@ -200,7 +195,7 @@ Als Nutzer möchte ich regelmäßige, datenbasierte Berichte über den Arbeitsma
 
 - **Sprache:** Python 3.11+
 - **Agenten-Framework:** `[NEEDS CLARIFICATION: LangGraph, CrewAI, AutoGen oder eigene Implementierung?]`
-- **LLM:** Claude (Anthropic API) für Textgenerierung (Anschreiben, Skill-Extraktion)
+- **LLM:** ChatGPT für Textgenerierung (Anschreiben, Skill-Extraktion)
 - **Datenbank:** `[NEEDS CLARIFICATION: SQLite für MVP, PostgreSQL für Production?]`
 - **Kommunikation zwischen Agenten:** Klar definierte JSON-Schemas über interne API-Calls oder Message Queue
 - **Frontend:** `[NEEDS CLARIFICATION: CLI-basiert für MVP oder einfaches Web-UI?]`
