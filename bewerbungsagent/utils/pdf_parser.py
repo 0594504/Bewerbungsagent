@@ -1,25 +1,27 @@
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 
 
-def extract_text_from_pdf(filepath):
-    """Liest den Text aus einer PDF-Datei und gibt ihn als String zurück."""
+def extrahiere_text(dateipfad):
+    """Liest den Text aus einer PDF-Datei und gibt ihn als String zurück.
 
+    Gibt leeren String zurück wenn die PDF nur Bilder enthält (kein Text).
+    """
     try:
-        doc = fitz.open(filepath)
+        doc = fitz.open(dateipfad)
     except FileNotFoundError:
-        print(f"Datei nicht gefunden: {filepath}")
-        return None
+        print(f"Datei nicht gefunden: {dateipfad}")
+        return ""
 
-    # Text aus allen Seiten zusammensammeln
+    # Text aus allen Seiten sammeln
     text = ""
     for seite in doc:
         text += seite.get_text()
 
     doc.close()
 
-    # Prüfen ob überhaupt Text vorhanden ist
+    # Warnung wenn kein Text gefunden (z.B. Bild-PDF)
     if not text.strip():
-        print("Kein lesbarer Text in der PDF gefunden. Möglicherweise ist es eine gescannte Datei.")
-        return None
+        print("Warnung: Kein lesbarer Text in der PDF (möglicherweise Bild-PDF ohne OCR).")
+        return ""
 
     return text

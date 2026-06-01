@@ -1,48 +1,24 @@
-import openpyxl
-from datetime import date
+import pandas as pd
 import os
 
-# Pfad zur Excel-Datei
-EXCEL_PFAD = os.path.join(os.path.dirname(__file__), "..", "data", "bewerbungen.xlsx")
 
-# Spaltenüberschriften
-HEADERS = ["Job Titel", "Unternehmen", "Match %", "Status", "Beworben am", "Antwort", "Link"]
+def exportiere_bewerbungen(conn, dateipfad="data/bewerbungen.xlsx"):
+    """Liest alle Bewerbungen aus SQLite und schreibt sie als Excel-Datei."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT job_titel, unternehmen, match_score, status, beworben_am, antwort, url
+        FROM applications
+        ORDER BY beworben_am DESC
+    """)
+    zeilen = cursor.fetchall()
 
+    spalten = ["Job Titel", "Unternehmen", "Match %", "Status", "Beworben am", "Antwort", "Link"]
+    df = pd.DataFrame(zeilen, columns=spalten)
 
-def _get_oder_erstelle_workbook():
-    """Lädt die Excel-Datei oder erstellt sie mit Header-Zeile, falls sie nicht existiert."""
+    # Ordner anlegen falls nötig
+    ordner = os.path.dirname(dateipfad)
+    if ordner:
+        os.makedirs(ordner, exist_ok=True)
 
-    if os.path.exists(EXCEL_PFAD):
-        wb = openpyxl.load_workbook(EXCEL_PFAD)
-        ws = wb.active
-    else:
-        # Neue Datei mit Header-Zeile erstellen
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Bewerbungen"
-        ws.append(HEADERS)
-
-    return wb, ws
-
-
-def add_bewerbung(titel, unternehmen, match_score, status, url):
-    """Fügt eine neue Bewerbung als Zeile in die Excel-Datei ein."""
-
-    wb, ws = _get_oder_erstelle_workbook()
-
-    # Neue Zeile mit heutigem Datum einfügen
-    neue_zeile = [
-        titel,
-        unternehmen,
-        match_score,
-        status,
-        date.today().isoformat(),
-        "",  # Antwort bleibt zunächst leer
-        url
-    ]
-    ws.append(neue_zeile)
-
-    # Datei speichern
-    os.makedirs(os.path.dirname(EXCEL_PFAD), exist_ok=True)
-    wb.save(EXCEL_PFAD)
-    print(f"Bewerbung gespeichert: {titel} bei {unternehmen}")
+    df.to_excel(dateipfad, index=False)
+    print(f"Bewerbungen exportiert nach: {dateipfad}")

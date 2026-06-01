@@ -1,249 +1,136 @@
 import json
 import os
 import sys
-import importlib.util
+import sqlite3
 import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 
-# Agenten per importlib laden (wegen numerischen Dateinamen)
-AGENTS_ORDNER = os.path.join(os.path.dirname(__file__), "..", "agents")
+# Projektwurzel zum Suchpfad hinzufügen
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import database
+from agents import skill_extractor, application_agent
+from utils import pdf_parser
 
 
-def _lade_modul(name, dateiname):
-    pfad = os.path.join(AGENTS_ORDNER, dateiname)
-    spec = importlib.util.spec_from_file_location(name, pfad)
-    modul = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modul)
-    return modul
-
-
-skill_extractor = _lade_modul("skill_extractor", "02_skill_extractor.py")
-
-# Excel-Handler direkt importieren
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from utils.excel_handler import add_bewerbung, EXCEL_PFAD, HEADERS
-import openpyxl
+# Hilfsfunktion: In-Memory-Datenbank für Tests (kein echter Dateizugriff)
+def _test_db():
+    conn = sqlite3.connect(":memory:")
+    database.erstelle_tabellen(conn)
+    return conn
 
 
 # =====================================================================
-# Tests für update_profil
+# Test 1: Skill-Extraktion aus Text
 # =====================================================================
 
-def test_neuer_skill_wird_hinzugefuegt(tmp_path):
-    """Prüft, dass ein neuer Skill korrekt ins Profil geschrieben wird."""
-
-    # Temporäres Profil verwenden
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    with patch.object(skill_extractor, "PROFIL_PFAD", test_profil_pfad):
-        neue_skills = {
-            "hard_skills": ["Python"],
-            "soft_skills": [],
-            "tools": [],
-            "erfahrungslevel": {"Python": 3}
-        }
-        skill_extractor.update_profil(neue_skills)
-
-        # Profil laden und prüfen
-        with open(test_profil_pfad, "r", encoding="utf-8") as f:
-            profil = json.load(f)
-
-    skill_namen = [s["name"] for s in profil["skills"]]
-    assert "Python" in skill_namen, "Python sollte im Profil sein"
-
-
-def test_duplikat_behaelt_hoeheren_level(tmp_path):
-    """Prüft, dass bei doppeltem Skill der höhere Level behalten wird."""
-
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    with patch.object(skill_extractor, "PROFIL_PFAD", test_profil_pfad):
-        # Ersten Skill mit Level 2 einfügen
-        skill_extractor.update_profil({
-            "hard_skills": ["Python"],
-            "soft_skills": [],
-            "tools": [],
-            "erfahrungslevel": {"Python": 2}
-        })
-
-        # Denselben Skill mit Level 4 einfügen
-        skill_extractor.update_profil({
-            "hard_skills": ["Python"],
-            "soft_skills": [],
-            "tools": [],
-            "erfahrungslevel": {"Python": 4}
-        })
-
-        with open(test_profil_pfad, "r", encoding="utf-8") as f:
-            profil = json.load(f)
-
-    python_skills = [s for s in profil["skills"] if s["name"] == "Python"]
-    assert len(python_skills) == 1, "Python sollte nur einmal vorkommen"
-    assert python_skills[0]["level"] == 4, "Level sollte 4 (der höhere) sein"
-
-
-def test_duplikat_behaelt_niedrigeren_level_unveraendert(tmp_path):
-    """Prüft, dass ein niedrigerer Level einen bestehenden höheren Level nicht überschreibt."""
-
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    with patch.object(skill_extractor, "PROFIL_PFAD", test_profil_pfad):
-        # Erst Level 5 einfügen
-        skill_extractor.update_profil({
-            "hard_skills": ["Java"],
-            "soft_skills": [],
-            "tools": [],
-            "erfahrungslevel": {"Java": 5}
-        })
-
-        # Dann Level 2 einfügen — sollte Level 5 NICHT überschreiben
-        skill_extractor.update_profil({
-            "hard_skills": ["Java"],
-            "soft_skills": [],
-            "tools": [],
-            "erfahrungslevel": {"Java": 2}
-        })
-
-        with open(test_profil_pfad, "r", encoding="utf-8") as f:
-            profil = json.load(f)
-
-    java_skill = next(s for s in profil["skills"] if s["name"] == "Java")
-    assert java_skill["level"] == 5, "Level 5 sollte erhalten bleiben"
-
-
-# =====================================================================
-# Tests für extract_from_text
-# =====================================================================
-
-def test_extract_from_text_gibt_dict_mit_erwarteten_keys_zurueck(tmp_path):
-    """Prüft, dass extract_from_text ein Dict mit den erwarteten Schlüsseln zurückgibt."""
-
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    # Ollama-Aufruf mocken
-    mock_antwort = json.dumps({
+def test_skill_extraktion_aus_text():
+    """Prüft ob JSON korrekt geparst wird wenn das LLM eine gültige Antwort liefert."""
+    antwort_mock = json.dumps({
         "hard_skills": ["Python", "Django"],
-        "soft_skills": ["Teamarbeit"],
+        "soft_skills": ["Teamwork"],
         "tools": ["Git"],
         "erfahrungslevel": {"Python": 3, "Django": 2}
     })
 
-    with patch.object(skill_extractor, "PROFIL_PFAD", test_profil_pfad):
-        # ask_ollama direkt im geladenen Modul patchen (from-Import hat eigene Referenz)
-        with patch.object(skill_extractor, "ask_ollama", return_value=mock_antwort):
-            ergebnis = skill_extractor.extract_from_text("Ich entwickle mit Python und Django.")
+    with patch("agents.skill_extractor.frage_ki", return_value=antwort_mock):
+        ergebnis = skill_extractor.extrahiere_skills_aus_text("Ich programmiere Python und nutze Git.")
 
-    assert ergebnis is not None, "Ergebnis sollte nicht None sein"
-    assert "hard_skills" in ergebnis, "Schlüssel 'hard_skills' fehlt"
-    assert "soft_skills" in ergebnis, "Schlüssel 'soft_skills' fehlt"
-    assert "tools" in ergebnis, "Schlüssel 'tools' fehlt"
-    assert "erfahrungslevel" in ergebnis, "Schlüssel 'erfahrungslevel' fehlt"
+    assert "Python" in ergebnis["hard_skills"]
+    assert "Teamwork" in ergebnis["soft_skills"]
+    assert "Git" in ergebnis["tools"]
+    assert ergebnis["erfahrungslevel"]["Python"] == 3
 
 
 # =====================================================================
-# Tests für match_profile
+# Test 2: Duplikat-Skill – höherer Level gewinnt
 # =====================================================================
 
-def test_match_score_liegt_zwischen_0_und_100(tmp_path):
-    """Prüft, dass der Match-Score zwischen 0 und 100 liegt."""
+def test_duplikat_skill_level():
+    """Prüft ob beim Speichern eines doppelten Skills der höhere Level behalten wird."""
+    conn = _test_db()
 
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    # Profil mit einem Skill anlegen
-    test_profil = {
-        "version": 1,
-        "nutzer_id": "user_001",
-        "skills": [{"name": "Python", "kategorie": "Hard Skill", "level": 3, "quelle": "test", "zuletzt_aktualisiert": "2026-05-30"}],
-        "erfahrungen": [],
-        "letztes_update": "2026-05-30"
+    # Skill zuerst mit Level 2 speichern
+    skills_v1 = {
+        "hard_skills": ["Python"],
+        "soft_skills": [],
+        "tools": [],
+        "erfahrungslevel": {"Python": 2}
     }
-    with open(test_profil_pfad, "w", encoding="utf-8") as f:
-        json.dump(test_profil, f)
+    skill_extractor.speichere_skills(skills_v1, "test_user", "test", conn)
 
-    mock_antwort = json.dumps({
-        "match_score": 75,
-        "vorhandene_skills": ["Python"],
-        "fehlende_skills": ["Docker"],
-        "lernbare_skills": ["Kubernetes"]
-    })
-
-    job = {"titel": "Python Entwickler", "unternehmen": "Test GmbH", "beschreibung": "Python Docker Kubernetes"}
-
-    # application_agent importieren und testen
-    application_agent = _lade_modul("application_agent", "03_application_agent.py")
-
-    with patch.object(application_agent, "PROFIL_PFAD", test_profil_pfad):
-        with patch.object(application_agent, "ask_ollama", return_value=mock_antwort):
-            ergebnis = application_agent.match_profile(job)
-
-    assert ergebnis is not None, "match_profile sollte ein Ergebnis zurückgeben"
-    assert 0 <= ergebnis["match_score"] <= 100, "Match-Score muss zwischen 0 und 100 liegen"
-
-
-def test_match_score_wird_auf_gueltigen_bereich_begrenzt(tmp_path):
-    """Prüft, dass ein Score > 100 auf 100 begrenzt wird."""
-
-    test_profil_pfad = str(tmp_path / "profil.json")
-
-    test_profil = {
-        "version": 1,
-        "nutzer_id": "user_001",
-        "skills": [{"name": "Python", "kategorie": "Hard Skill", "level": 5, "quelle": "test", "zuletzt_aktualisiert": "2026-05-30"}],
-        "erfahrungen": [],
-        "letztes_update": "2026-05-30"
+    # Gleichen Skill mit Level 4 speichern
+    skills_v2 = {
+        "hard_skills": ["Python"],
+        "soft_skills": [],
+        "tools": [],
+        "erfahrungslevel": {"Python": 4}
     }
-    with open(test_profil_pfad, "w", encoding="utf-8") as f:
-        json.dump(test_profil, f)
+    skill_extractor.speichere_skills(skills_v2, "test_user", "test", conn)
 
-    # LLM gibt ungültigen Score zurück
-    mock_antwort = json.dumps({"match_score": 150, "vorhandene_skills": [], "fehlende_skills": [], "lernbare_skills": []})
-    job = {"titel": "Test Job", "beschreibung": "Python"}
+    profil = skill_extractor.lade_profil("test_user", conn)
+    python_skill = next(s for s in profil if s["name"] == "Python")
 
-    application_agent = _lade_modul("application_agent", "03_application_agent.py")
-
-    with patch.object(application_agent, "PROFIL_PFAD", test_profil_pfad):
-        with patch.object(application_agent, "ask_ollama", return_value=mock_antwort):
-            ergebnis = application_agent.match_profile(job)
-
-    assert ergebnis["match_score"] == 100, "Score > 100 soll auf 100 begrenzt werden"
+    assert python_skill["level"] == 4, "Level 4 sollte den Level 2 ersetzen"
+    conn.close()
 
 
 # =====================================================================
-# Tests für add_bewerbung (Excel)
+# Test 3: Match-Score Berechnung
 # =====================================================================
 
-def test_excel_datei_wird_erstellt_und_hat_korrekten_header(tmp_path):
-    """Prüft, dass add_bewerbung eine Excel-Datei mit korrekten Spaltenüberschriften erstellt."""
+def test_match_score_berechnung():
+    """Prüft das Keyword-Matching mit Beispiel-Skills und Beschreibung."""
+    profil_skills = [
+        {"name": "Python", "kategorie": "Hard Skill", "level": 3},
+        {"name": "SQL", "kategorie": "Hard Skill", "level": 2},
+        {"name": "Docker", "kategorie": "Tool", "level": 1}
+    ]
 
-    test_excel_pfad = str(tmp_path / "bewerbungen.xlsx")
+    # Stelle erwähnt 2 von 3 Skills → Score ca. 66%
+    beschreibung = "Wir suchen einen Entwickler mit Python und SQL-Kenntnissen."
+    score = application_agent.berechne_match_score(beschreibung, profil_skills)
 
-    with patch("utils.excel_handler.EXCEL_PFAD", test_excel_pfad):
-        add_bewerbung("Python Entwickler", "Test GmbH", 85, "Gesendet", "https://example.com")
-
-    assert os.path.exists(test_excel_pfad), "Excel-Datei sollte erstellt worden sein"
-
-    wb = openpyxl.load_workbook(test_excel_pfad)
-    ws = wb.active
-
-    # Header-Zeile prüfen
-    header = [ws.cell(1, col).value for col in range(1, len(HEADERS) + 1)]
-    assert header == HEADERS, f"Header stimmt nicht überein. Erwartet: {HEADERS}, Erhalten: {header}"
+    assert 0 < score <= 100, "Score muss zwischen 0 und 100 liegen"
+    assert score >= 60, "2 von 3 Skills sollten einen Score von mindestens 60 ergeben"
 
 
-def test_excel_bewerbung_wird_als_zeile_gespeichert(tmp_path):
-    """Prüft, dass die Bewerbungsdaten korrekt in die Excel-Datei geschrieben werden."""
+# =====================================================================
+# Test 4: PDF-Parser – kein Text (Bild-PDF)
+# =====================================================================
 
-    test_excel_pfad = str(tmp_path / "bewerbungen.xlsx")
+def test_pdf_parser_kein_text():
+    """Prüft ob leerer String zurückkommt wenn das PDF keinen lesbaren Text hat."""
+    mock_doc = MagicMock()
+    mock_seite = MagicMock()
+    mock_seite.get_text.return_value = ""
+    mock_doc.__iter__ = MagicMock(return_value=iter([mock_seite]))
+    mock_doc.close = MagicMock()
 
-    with patch("utils.excel_handler.EXCEL_PFAD", test_excel_pfad):
-        add_bewerbung("Data Scientist", "KI Corp", 92, "Gesendet", "https://example.com/job/123")
+    with patch("utils.pdf_parser.fitz.open", return_value=mock_doc):
+        ergebnis = pdf_parser.extrahiere_text("dummy.pdf")
 
-    wb = openpyxl.load_workbook(test_excel_pfad)
-    ws = wb.active
+    assert ergebnis == "", "Bild-PDF soll leeren String zurückgeben"
 
-    # Erste Datenzeile (Zeile 2, da Zeile 1 der Header ist)
-    assert ws["A2"].value == "Data Scientist", "Job-Titel in Spalte A falsch"
-    assert ws["B2"].value == "KI Corp", "Unternehmen in Spalte B falsch"
-    assert ws["C2"].value == 92, "Match-Score in Spalte C falsch"
-    assert ws["G2"].value == "https://example.com/job/123", "URL in Spalte G falsch"
+
+# =====================================================================
+# Test 5: Datenbank – alle 5 Tabellen werden angelegt
+# =====================================================================
+
+def test_datenbank_tabellen():
+    """Prüft ob alle 5 Tabellen korrekt in der In-Memory-Datenbank angelegt werden."""
+    conn = sqlite3.connect(":memory:")
+    database.erstelle_tabellen(conn)
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tabellen = {zeile[0] for zeile in cursor.fetchall()}
+
+    assert "skills" in tabellen
+    assert "erfahrungen" in tabellen
+    assert "applications" in tabellen
+    assert "stellenanzeigen" in tabellen
+    assert "skill_trends" in tabellen
+
+    conn.close()

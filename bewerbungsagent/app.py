@@ -1,242 +1,307 @@
 import streamlit as st
-import json
-import os
-import importlib.util
 import sys
+import os
 import tempfile
 import pandas as pd
 
-# Agenten per importlib laden (wegen numerischen Dateinamen)
-def _lade_modul(name, pfad):
-    spec = importlib.util.spec_from_file_location(name, pfad)
-    modul = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modul)
-    return modul
+# Projektwurzel zum Suchpfad hinzufügen
+sys.path.insert(0, os.path.dirname(__file__))
 
-AGENTS_ORDNER = os.path.join(os.path.dirname(__file__), "agents")
+import database
+from agents import skill_extractor, application_agent, market_agent
+from utils import excel_handler
 
-skill_extractor = _lade_modul("skill_extractor", os.path.join(AGENTS_ORDNER, "02_skill_extractor.py"))
-application_agent = _lade_modul("application_agent", os.path.join(AGENTS_ORDNER, "03_application_agent.py"))
-market_agent = _lade_modul("market_agent", os.path.join(AGENTS_ORDNER, "04_market_agent.py"))
+# Fester Nutzer-ID für den MVP
+NUTZER_ID = "user_001"
 
-# Pfad zum Profil
-PROFIL_PFAD = os.path.join(os.path.dirname(__file__), "data", "profil.json")
-
-
-def lade_profil():
-    """Lädt das Benutzerprofil oder gibt None zurück."""
-    if not os.path.exists(PROFIL_PFAD):
-        return None
-    with open(PROFIL_PFAD, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-# --- Seiteneinstellungen ---
-st.set_page_config(
-    page_title="KI-Bewerbungsagent",
-    page_icon="💼",
-    layout="wide"
-)
-
-st.title("KI-Bewerbungsagent")
-st.caption("Dein lokaler, datenschutzfreundlicher Bewerbungsassistent")
-
-# --- Navigation mit Tabs ---
-tab_profil, tab_text, tab_pdf, tab_jobs, tab_trends = st.tabs([
-    "Mein Profil",
-    "Skills eingeben",
-    "PDF hochladen",
-    "Jobs suchen",
-    "Markttrends"
-])
+# Datenbank einmal pro Session aufbauen (Streamlit-Cache)
+@st.cache_resource
+def get_db():
+    conn = database.verbinde_db()
+    database.erstelle_tabellen(conn)
+    return conn
 
 
 # =====================================================================
-# TAB 1: Mein Profil
+# Tab-Funktionen
 # =====================================================================
-with tab_profil:
-    st.header("Mein Skill-Profil")
 
-    profil = lade_profil()
+def tab_profil(conn):
+    st.header("Mein Profil")
 
-    if profil is None:
-        st.info("Noch kein Profil vorhanden. Gib deine Skills unter 'Skills eingeben' ein oder lade eine PDF hoch.")
-    else:
-        # Metadaten anzeigen
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Anzahl Skills", len(profil["skills"]))
-        with col2:
-            st.metric("Letztes Update", profil.get("letztes_update", "–"))
-
-        # Skills als Tabelle
-        if profil["skills"]:
-            skills_df = pd.DataFrame(profil["skills"])
-            # Spalten umbenennen für bessere Lesbarkeit
-            skills_df = skills_df.rename(columns={
-                "name": "Skill",
-                "kategorie": "Kategorie",
-                "level": "Level (1-5)",
-                "quelle": "Quelle",
-                "zuletzt_aktualisiert": "Aktualisiert"
-            })
-            st.dataframe(skills_df, use_container_width=True)
-
-        # Rohdaten optional anzeigen
-        with st.expander("Rohdaten (JSON)"):
-            st.json(profil)
-
-
-# =====================================================================
-# TAB 2: Skills aus Text eingeben
-# =====================================================================
-with tab_text:
-    st.header("Skills aus Text extrahieren")
-    st.write("Beschreibe was du gemacht hast — der Agent erkennt deine Skills automatisch.")
-
-    beispiel = "Beispiel: Ich habe eine REST API mit FastAPI und PostgreSQL entwickelt und das Team bei der Einführung von Docker-Containern unterstützt."
-    text_eingabe = st.text_area("Beschreibe deine Erfahrungen:", placeholder=beispiel, height=200)
-
+    # Freitext-Eingabe für Skills
+    text = st.text_area(
+        "Beschreibe deine Erfahrungen und Skills:",
+        placeholder="z.B. Ich habe 2 Jahre Python-Erfahrung und kenne Django und PostgreSQL.",
+        height=150
+    )
     if st.button("Skills extrahieren", type="primary"):
-        if not text_eingabe.strip():
+        if not text.strip():
             st.warning("Bitte gib einen Text ein.")
         else:
-            with st.spinner("Analysiere Text mit KI..."):
-                skills = skill_extractor.extract_from_text(text_eingabe)
-
-            if skills:
-                st.success("Skills erfolgreich extrahiert!")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write("**Hard Skills**")
-                    for s in skills.get("hard_skills", []):
-                        st.write(f"• {s}")
-                with col2:
-                    st.write("**Soft Skills**")
-                    for s in skills.get("soft_skills", []):
-                        st.write(f"• {s}")
-                with col3:
-                    st.write("**Tools**")
-                    for s in skills.get("tools", []):
-                        st.write(f"• {s}")
-                st.info("Profil wurde aktualisiert.")
+            with st.spinner("Analysiere mit Ollama..."):
+                skills = skill_extractor.extrahiere_skills_aus_text(text)
+            if skills.get("hard_skills") or skills.get("soft_skills") or skills.get("tools"):
+                skill_extractor.speichere_skills(skills, NUTZER_ID, "freitext", conn)
+                st.success("Skills extrahiert und gespeichert!")
+                st.json(skills)
             else:
-                st.error("Konnte keine Skills extrahieren. Läuft Ollama?")
+                st.warning("Keine Skills erkannt. Läuft Ollama? (ollama serve)")
 
+    st.divider()
 
-# =====================================================================
-# TAB 3: PDF hochladen
-# =====================================================================
-with tab_pdf:
-    st.header("Skills aus PDF extrahieren")
-    st.write("Lade deinen Lebenslauf oder ein Zertifikat hoch.")
+    # PDF-Upload
+    pdf_datei = st.file_uploader("PDF hochladen (Lebenslauf, Zertifikat)", type="pdf")
+    if pdf_datei:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(pdf_datei.read())
+            tmp_pfad = tmp.name
 
-    hochgeladene_datei = st.file_uploader("PDF-Datei auswählen", type=["pdf"])
-
-    if hochgeladene_datei and st.button("PDF analysieren", type="primary"):
         with st.spinner("Lese PDF und extrahiere Skills..."):
-            # Temporäre Datei erstellen
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(hochgeladene_datei.read())
-                tmp_pfad = tmp.name
+            skills = skill_extractor.extrahiere_skills_aus_pdf(tmp_pfad)
+        os.unlink(tmp_pfad)
 
-            skills = skill_extractor.extract_from_pdf(tmp_pfad)
-            os.unlink(tmp_pfad)  # Temporäre Datei löschen
-
-        if skills:
-            st.success("Skills aus PDF extrahiert!")
+        if skills.get("hard_skills") or skills.get("soft_skills") or skills.get("tools"):
+            skill_extractor.speichere_skills(skills, NUTZER_ID, "pdf", conn)
+            st.success("Skills aus PDF extrahiert und gespeichert!")
             st.json(skills)
-            st.info("Profil wurde aktualisiert.")
         else:
-            st.error("Konnte keine Skills aus der PDF lesen.")
+            st.warning("Kein lesbarer Text im PDF oder Ollama läuft nicht.")
 
+    st.divider()
 
-# =====================================================================
-# TAB 4: Jobs suchen
-# =====================================================================
-with tab_jobs:
-    st.header("Jobs suchen & matchen")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        jobtitel = st.text_input("Jobtitel", placeholder="z.B. Python Entwickler")
-    with col2:
-        ort = st.text_input("Ort", placeholder="z.B. Berlin")
-
-    if st.button("Jobs suchen", type="primary"):
-        if not jobtitel.strip():
-            st.warning("Bitte gib einen Jobtitel ein.")
-        else:
-            with st.spinner(f"Suche Jobs für '{jobtitel}'..."):
-                jobs = application_agent.find_jobs(jobtitel, ort or "Deutschland")
-
-            if not jobs:
-                st.warning("Keine Jobs gefunden. Prüfe deine Internetverbindung.")
-            else:
-                st.success(f"{len(jobs)} Jobs gefunden!")
-
-                # Für jeden Job Match-Score berechnen
-                for job in jobs:
-                    with st.expander(f"{job['titel']} — {job['unternehmen']} ({job['ort']})"):
-                        col_info, col_match = st.columns([3, 1])
-
-                        with col_info:
-                            st.write(job.get("beschreibung", ""))
-                            if job.get("url"):
-                                st.markdown(f"[Zur Stellenanzeige]({job['url']})")
-
-                        with col_match:
-                            with st.spinner("Berechne Match..."):
-                                match = application_agent.match_profile(job)
-
-                            if match:
-                                score = match.get("match_score", 0)
-                                # Farbe je nach Score
-                                farbe = "green" if score >= 70 else "orange" if score >= 40 else "red"
-                                st.markdown(f"**Match: :{farbe}[{score}%]**")
-
-                                if match.get("fehlende_skills"):
-                                    st.write("**Fehlende Skills:**")
-                                    for s in match["fehlende_skills"][:5]:
-                                        st.write(f"• {s}")
-
-
-# =====================================================================
-# TAB 5: Markttrends
-# =====================================================================
-with tab_trends:
-    st.header("Skill-Markttrends")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Marktdaten aktualisieren"):
-            with st.spinner("Scrape Stellenanzeigen (dauert ca. 1-2 Minuten)..."):
-                anzahl = market_agent.scrape_jobs("Software Entwickler", "Deutschland", anzahl=50)
-                market_agent.aktualisiere_skill_trends()
-            st.success(f"{anzahl} neue Stellenanzeigen gespeichert.")
-
-    with col2:
-        if st.button("Trends analysieren"):
-            with st.spinner("Analysiere Trends..."):
-                signale = market_agent.analyze_trends()
-
-            if signale:
-                # Tabelle der Top-Trends anzeigen
-                df = pd.DataFrame(signale)
-                df = df.rename(columns={
-                    "skill": "Skill",
-                    "trend": "Trend",
-                    "signal_staerke": "Signal-Stärke",
-                    "durchschnitt_nennungen": "Ø Nennungen/Tag"
-                })
-                st.dataframe(df.head(20), use_container_width=True)
-
-    # Balkendiagramm der häufigsten Skills
-    st.subheader("Top Skills der letzten 7 Tage")
-    trend_daten = market_agent.hole_trend_daten_fuer_chart()
-
-    if trend_daten.empty:
-        st.info("Noch keine Marktdaten. Klicke auf 'Marktdaten aktualisieren'.")
+    # Gespeichertes Profil anzeigen
+    profil = skill_extractor.lade_profil(NUTZER_ID, conn)
+    if profil:
+        st.subheader(f"Gespeicherte Skills ({len(profil)})")
+        df = pd.DataFrame(profil)
+        df.columns = ["Skill", "Kategorie", "Level (1-5)", "Quelle", "Aktualisiert"]
+        st.dataframe(df, use_container_width=True)
     else:
-        trend_daten = trend_daten.set_index("skill_name")
-        st.bar_chart(trend_daten["gesamt"])
+        st.info("Noch keine Skills gespeichert.")
+
+
+def tab_stellen_suchen(conn):
+    st.header("Stellen suchen")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        jobtitel = st.text_input("Jobtitel", "Python Entwickler")
+    with col2:
+        ort = st.text_input("Ort", "Berlin")
+
+    if st.button("Suchen", type="primary"):
+        with st.spinner(f"Suche Stellen für '{jobtitel}' in '{ort}'..."):
+            stellen = application_agent.suche_passende_stellen(jobtitel, ort, NUTZER_ID, conn)
+        if stellen:
+            st.session_state.stellen = stellen
+            st.session_state.anschreiben = ""
+            st.session_state.senden_bestaetigt = False
+        else:
+            st.warning("Keine Stellen gefunden. Netzwerk prüfen.")
+
+    # Ergebnisse und Anschreiben-Flow nur anzeigen wenn Suche gelaufen ist
+    stellen = st.session_state.get("stellen", [])
+    if not stellen:
+        return
+
+    st.success(f"{len(stellen)} Stellen gefunden.")
+
+    # Stelle auswählen
+    optionen = [f"{s['titel']} – {s['unternehmen']} ({s['match_score']}%)" for s in stellen]
+    idx = st.selectbox("Stelle auswählen:", range(len(optionen)), format_func=lambda i: optionen[i])
+    stelle = stellen[idx]
+
+    col_info, col_meta = st.columns([3, 1])
+    with col_info:
+        with st.expander("Stellenbeschreibung anzeigen"):
+            st.write(stelle.get("beschreibung") or "–")
+    with col_meta:
+        st.metric("Match-Score", f"{stelle['match_score']} %")
+        if stelle.get("url"):
+            st.markdown(f"[Zur Anzeige]({stelle['url']})")
+
+    st.divider()
+
+    # Anschreiben generieren
+    if st.button("Anschreiben generieren (Claude API)", type="primary"):
+        profil = skill_extractor.lade_profil(NUTZER_ID, conn)
+        with st.spinner("Generiere Anschreiben mit Claude..."):
+            anschreiben = application_agent.generiere_anschreiben(stelle, profil, NUTZER_ID)
+        if anschreiben:
+            st.session_state.anschreiben = anschreiben
+            st.session_state.anschreiben_stelle = stelle
+            st.session_state.senden_bestaetigt = False
+        else:
+            st.error("Anschreiben konnte nicht generiert werden. ANTHROPIC_API_KEY gesetzt?")
+
+    # Anschreiben anzeigen und Aktionen
+    anschreiben = st.session_state.get("anschreiben", "")
+    if not anschreiben:
+        return
+
+    st.subheader("Generiertes Anschreiben")
+    anschreiben_text = st.text_area("Anschreiben (bearbeitbar):", value=anschreiben, height=350, key="anschreiben_inhalt")
+
+    col_save, col_send = st.columns(2)
+
+    with col_save:
+        if st.button("Als Entwurf speichern"):
+            application_agent.speichere_bewerbung(stelle, stelle.get("match_score", 0), "Entwurf", conn)
+            st.success("Als Entwurf gespeichert.")
+
+    with col_send:
+        empfaenger = st.text_input("Empfänger-E-Mail:", key="empfaenger_email")
+        if st.button("Bewerbung absenden"):
+            if not empfaenger:
+                st.error("Bitte zuerst eine E-Mail-Adresse eingeben.")
+            else:
+                st.session_state.senden_bestaetigt = True
+
+        # Zweiter Schritt – explizite Letztbestätigung in der UI
+        if st.session_state.get("senden_bestaetigt"):
+            st.warning(f"Wirklich an **{empfaenger}** senden? Diese Aktion kann nicht rückgängig gemacht werden.")
+            if st.button("Ja, jetzt senden", type="primary"):
+                with st.spinner("Sende Bewerbung..."):
+                    erfolg = application_agent.sende_bewerbung(
+                        stelle, anschreiben_text, empfaenger, bestaetigt=True
+                    )
+                if erfolg:
+                    application_agent.speichere_bewerbung(stelle, stelle.get("match_score", 0), "Versandt", conn)
+                    st.success("Bewerbung gesendet und im Tracking gespeichert!")
+                    st.session_state.senden_bestaetigt = False
+                else:
+                    st.error("Versand fehlgeschlagen. SMTP_USER / SMTP_PASSWORT prüfen.")
+
+
+def tab_bewerbungen(conn):
+    st.header("Bewerbungen")
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT job_titel, unternehmen, match_score, status, beworben_am, antwort, url
+        FROM applications ORDER BY beworben_am DESC
+    """)
+    zeilen = cursor.fetchall()
+
+    if zeilen:
+        spalten = ["Job Titel", "Unternehmen", "Match %", "Status", "Beworben am", "Antwort", "Link"]
+        df = pd.DataFrame(zeilen, columns=spalten)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("Noch keine Bewerbungen vorhanden.")
+
+    if st.button("Als Excel exportieren"):
+        excel_handler.exportiere_bewerbungen(conn, "data/bewerbungen.xlsx")
+        st.success("Exportiert nach data/bewerbungen.xlsx")
+
+
+def tab_marktanalyse(conn):
+    st.header("Marktanalyse")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        jobtitel = st.text_input("Jobtitel für Analyse", "Software Entwickler", key="markt_titel")
+    with col2:
+        ort = st.text_input("Ort", "Berlin", key="markt_ort")
+
+    if st.button("Marktdaten aktualisieren", type="primary"):
+        with st.spinner("Sammle Stellenanzeigen und analysiere Skills..."):
+            market_agent.sammle_marktdaten(jobtitel, ort, conn)
+        st.success("Marktdaten aktualisiert!")
+
+    trends = market_agent.berechne_trends(conn)
+    if not trends:
+        st.info("Noch keine Trenddaten. Bitte zuerst Marktdaten aktualisieren.")
+        return
+
+    # --- Trendtabelle ---
+    st.subheader("Top-10 Skills (letzte 30 Tage)")
+    df = pd.DataFrame(trends)
+    df = df.rename(columns={
+        "skill": "Skill",
+        "trend": "Trend",
+        "steigung": "Steigung",
+        "veraenderung_prozent": "Änderung %",
+        "nennungen_aktuell": "Nennungen",
+        "fruehindikator": "Frühindikator"
+    })
+    st.dataframe(df, use_container_width=True)
+
+    # Frühindikator-Warnungen separat hervorheben
+    frueh = [t for t in trends if t.get("fruehindikator")]
+    for t in frueh:
+        st.warning(
+            f"Frühindikator: **{t['skill']}** verliert Nachfrage "
+            f"({t['veraenderung_prozent']}% in 30 Tagen). Weiterbildung empfohlen."
+        )
+
+    st.divider()
+
+    # --- Feedback-Loop: Marktsignal an Skill Tracker ---
+    st.subheader("Marktsignal an Skill Tracker senden")
+    st.caption("Fügt wachsende Skills als Lernziele ins Profil ein und gibt Warnungen für sinkende Skills aus.")
+
+    if st.button("Marktsignal senden"):
+        signal_dict = {
+            "wachsende_skills": [t for t in trends if t["trend"] == "wachsend"],
+            "sinkende_skills": [t for t in trends if t["trend"] == "sinkend"]
+        }
+        ergebnis = market_agent.sende_marktsignal_an_skill_extractor(signal_dict, conn)
+
+        if ergebnis["hinzugefuegt"]:
+            st.success(f"Als Lernziele ins Profil eingetragen: {', '.join(ergebnis['hinzugefuegt'])}")
+        for warnung in ergebnis["warnungen"]:
+            st.warning(warnung)
+        if not ergebnis["hinzugefuegt"] and not ergebnis["warnungen"]:
+            st.info("Keine Änderungen – alle wachsenden Skills sind bereits im Profil.")
+
+    st.divider()
+
+    # --- Skill-Lücken ---
+    st.subheader("Skill-Lückenanalyse")
+    luecken = market_agent.erkenne_skill_luecken(NUTZER_ID, conn)
+
+    col_fehlt, col_lern = st.columns(2)
+    with col_fehlt:
+        st.markdown("**Fehlende Skills** (Markt braucht, Profil hat nicht)")
+        fehlende = luecken.get("fehlende_skills", [])
+        if fehlende:
+            st.dataframe(pd.DataFrame(fehlende), use_container_width=True)
+        else:
+            st.info("Keine Lücken – alle Top-Skills sind im Profil.")
+
+    with col_lern:
+        st.markdown("**Lernpotenzial** (vorhanden, aber Level ≤ 2)")
+        lernbare = luecken.get("lernbare_skills", [])
+        if lernbare:
+            st.dataframe(pd.DataFrame(lernbare), use_container_width=True)
+        else:
+            st.info("Kein Lernpotenzial identifiziert.")
+
+
+# =====================================================================
+# App-Start
+# =====================================================================
+
+st.set_page_config(page_title="KI-Bewerbungsagent", layout="wide")
+st.title("KI-Bewerbungsagent")
+st.caption("Lokal, datenschutzfreundlich, KI-gestützt")
+
+conn = get_db()
+
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Mein Profil",
+    "Stellen suchen",
+    "Bewerbungen",
+    "Marktanalyse"
+])
+
+with tab1:
+    tab_profil(conn)
+with tab2:
+    tab_stellen_suchen(conn)
+with tab3:
+    tab_bewerbungen(conn)
+with tab4:
+    tab_marktanalyse(conn)
