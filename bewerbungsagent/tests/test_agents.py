@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import database
-from agents import skill_extractor, application_agent
+from agents import agent1, application_agent
 from utils import pdf_parser
 
 
@@ -26,7 +26,7 @@ def _test_db():
 # =====================================================================
 
 def test_skill_extraktion_aus_text():
-    """Prüft ob JSON korrekt geparst wird wenn das LLM eine gültige Antwort liefert."""
+    """Prüft ob JSON korrekt geparst wird wenn Claude eine gültige Antwort liefert."""
     antwort_mock = json.dumps({
         "hard_skills": ["Python", "Django"],
         "soft_skills": ["Teamwork"],
@@ -34,8 +34,16 @@ def test_skill_extraktion_aus_text():
         "erfahrungslevel": {"Python": 3, "Django": 2}
     })
 
-    with patch("agents.skill_extractor.frage_ki", return_value=antwort_mock):
-        ergebnis = skill_extractor.extrahiere_skills_aus_text("Ich programmiere Python und nutze Git.")
+    mock_content = MagicMock()
+    mock_content.text = antwort_mock
+    mock_msg = MagicMock()
+    mock_msg.content = [mock_content]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_msg
+
+    with patch("agents.agent1.anthropic.Anthropic", return_value=mock_client), \
+         patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+        ergebnis = agent1.extrahiere_skills_aus_text("Ich programmiere Python und nutze Git.")
 
     assert "Python" in ergebnis["hard_skills"]
     assert "Teamwork" in ergebnis["soft_skills"]
@@ -58,7 +66,7 @@ def test_duplikat_skill_level():
         "tools": [],
         "erfahrungslevel": {"Python": 2}
     }
-    skill_extractor.speichere_skills(skills_v1, "test_user", "test", conn)
+    agent1.speichere_skills(skills_v1, "test_user", "test", conn)
 
     # Gleichen Skill mit Level 4 speichern
     skills_v2 = {
@@ -67,9 +75,9 @@ def test_duplikat_skill_level():
         "tools": [],
         "erfahrungslevel": {"Python": 4}
     }
-    skill_extractor.speichere_skills(skills_v2, "test_user", "test", conn)
+    agent1.speichere_skills(skills_v2, "test_user", "test", conn)
 
-    profil = skill_extractor.lade_profil("test_user", conn)
+    profil = agent1.lade_profil("test_user", conn)
     python_skill = next(s for s in profil if s["name"] == "Python")
 
     assert python_skill["level"] == 4, "Level 4 sollte den Level 2 ersetzen"

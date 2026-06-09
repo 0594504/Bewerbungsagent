@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(__file__))
 
 import database
-from agents import skill_extractor, application_agent, market_agent
+from agents import agent1 as skill_extractor, application_agent, market_agent
 from utils import excel_handler
 
 # Fester Nutzer-ID für den MVP

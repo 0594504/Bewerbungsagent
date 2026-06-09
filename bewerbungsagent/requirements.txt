@@ -13,3 +13,4 @@ openpyxl
 schedule
 pytest
 ollama
+pillow
