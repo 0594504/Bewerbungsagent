@@ -1,7 +1,6 @@
-import anthropic
-import base64
 import json
 import os
+import requests
 import sys
 from datetime import date
 
@@ -14,7 +13,7 @@ from utils.pdf_parser import extrahiere_text
 # Prompts
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Allgemeiner Text-Prompt (kein {text}-Platzhalter – _ruf_claude_text hängt Text selbst an)
+# Allgemeiner Text-Prompt (kein {text}-Platzhalter – wird in den Aufruf eingebettet)
 TEXT_SKILL_PROMPT = """Extrahiere Skills aus dem folgenden Text. Antworte NUR mit JSON, kein anderer Text:
 {
   "hard_skills": [],
@@ -92,68 +91,24 @@ def _parse_json(antwort):
         return None
 
 
-def _ruf_claude_vision(dateipfad, prompt):
-    """Kodiert Bild als Base64 und schickt es mit dem Prompt an Claude Vision."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        print("ANTHROPIC_API_KEY ist nicht gesetzt.")
-        return ""
-
-    endung = os.path.splitext(dateipfad)[1].lower()
-    medientyp = BILD_ENDUNGEN.get(endung, "image/png")
-
-    with open(dateipfad, "rb") as f:
-        bild_base64 = base64.standard_b64encode(f.read()).decode("utf-8")
-
+def _ruf_ollama(prompt_text):
+    """Schickt einen Prompt an Ollama (llama3.2) und gibt die Antwort zurück."""
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        nachricht = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": medientyp,
-                            "data": bild_base64,
-                        },
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }],
-        )
-        return nachricht.content[0].text
-
+        antwort = requests.post("http://localhost:11434/api/generate", json={
+            "model": "llama3.2",
+            "prompt": prompt_text,
+            "stream": False
+        })
+        return antwort.json().get("response", "")
     except Exception as e:
-        print(f"Claude Vision API Fehler: {e}")
+        print(f"Ollama API Fehler: {e}")
         return ""
 
 
-def _ruf_claude_text(text, prompt):
-    """Schickt reinen Text mit dem Prompt an Claude (für PDFs und Freitext)."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        print("ANTHROPIC_API_KEY ist nicht gesetzt.")
-        return ""
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        nachricht = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": f"{prompt}\n\nText:\n{text[:3000]}",
-            }],
-        )
-        return nachricht.content[0].text
-
-    except Exception as e:
-        print(f"Claude Text API Fehler: {e}")
-        return ""
+def _ruf_ollama_vision(dateipfad, prompt):
+    """Vision nicht verfügbar mit Ollama"""
+    print("Vision nicht verfügbar mit Ollama")
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,8 +116,8 @@ def _ruf_claude_text(text, prompt):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extrahiere_skills_aus_text(text):
-    """Schickt Freitext an Claude und gibt extrahierte Skills als Dict zurück."""
-    antwort = _ruf_claude_text(text, TEXT_SKILL_PROMPT)
+    """Schickt Freitext an Ollama und gibt extrahierte Skills als Dict zurück."""
+    antwort = _ruf_ollama(f"{TEXT_SKILL_PROMPT}\n\nText:\n{text[:3000]}")
     if not antwort:
         return dict(_LEERES_ERGEBNIS)
     return _parse_json(antwort) or dict(_LEERES_ERGEBNIS)
@@ -177,16 +132,16 @@ def extrahiere_skills_aus_pdf(dateipfad):
 
 
 def extrahiere_skills_aus_bild(dateipfad):
-    """Liest ein Bild als Base64 und extrahiert Skills via Claude Vision."""
-    antwort = _ruf_claude_vision(dateipfad, BILD_PROMPT)
+    """Bildverarbeitung nicht verfügbar mit Ollama."""
+    antwort = _ruf_ollama_vision(dateipfad, BILD_PROMPT)
     if not antwort:
         return dict(_LEERES_ERGEBNIS)
     return _parse_json(antwort) or dict(_LEERES_ERGEBNIS)
 
 
 def extrahiere_skills_aus_linkedin(dateipfad):
-    """LinkedIn-Screenshot analysieren – erkennt Jobtitel, Zertifikate und Empfehlungen."""
-    antwort = _ruf_claude_vision(dateipfad, LINKEDIN_PROMPT)
+    """LinkedIn-Screenshot-Verarbeitung nicht verfügbar mit Ollama."""
+    antwort = _ruf_ollama_vision(dateipfad, LINKEDIN_PROMPT)
     if not antwort:
         return dict(_LEERES_ERGEBNIS)
     return _parse_json(antwort) or dict(_LEERES_ERGEBNIS)
@@ -205,9 +160,9 @@ def extrahiere_skills_aus_zertifikat(dateipfad):
         text = extrahiere_text(dateipfad)
         if not text:
             return dict(_LEERES_ERGEBNIS), None
-        antwort = _ruf_claude_text(text, ZERTIFIKAT_PROMPT)
+        antwort = _ruf_ollama(f"{ZERTIFIKAT_PROMPT}\n\nText:\n{text[:3000]}")
     else:
-        antwort = _ruf_claude_vision(dateipfad, ZERTIFIKAT_PROMPT)
+        antwort = _ruf_ollama_vision(dateipfad, ZERTIFIKAT_PROMPT)
 
     if not antwort:
         return dict(_LEERES_ERGEBNIS), None
